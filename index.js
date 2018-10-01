@@ -1,3 +1,20 @@
+/*
+
+Should be set as env vars:
+
+For staging:
+
+VALIDATOR_ADDRESS ='0x5340fdE146C4fEf52558FE0943A23605CE160AF9'
+API_URL = 'http://api-rinkeby.etherscan.io/api'
+API_TOKEN = 'YourApiToken'
+
+Enviroment variables:
+process.env.VALIDATOR_ADDRESS
+process.env.API_URL
+process.env.API_TOKEN
+
+*/
+
 require('dotenv').config();
 const redis = require("redis");
 const bluebird = require("bluebird");
@@ -7,8 +24,10 @@ const LivepeerSDK = require('@livepeer/sdk');
 const Web3 = require('web3');
 const SolidityCoder = require("./../web3.js/lib/solidity/coder.js");
 
-const compileTxnHistory = require('./combine-txns-history.js');
-const web3 = new Web3(new Web3.providers.HttpProvider('http://localhost:8545'));
+//const compileTxnHistory = require('./combine-txns-history.js');
+const getTransactionsList = require('./combine-txns-history.js');
+//const web3 = new Web3(new Web3.providers.HttpProvider('http://localhost:8545'));
+const web3 = new Web3(new Web3.providers.HttpProvider('http://geth-int:8545'));
 
 const Json2csvParser = require('json2csv').Parser;
 const fs = require("fs");
@@ -16,9 +35,11 @@ const fs = require("fs");
 const RDS_TXN_PRE = 'eth_txn_receipt.';
 const RDS_BLOCK_PRE = 'eth_block.';
 
+const API_URL = process.env.API_URL;
+const API_TOKEN = process.env.API_TOKEN;
 
 const LIVEPEER_CONTRACT = '0x511Bc4556D823Ae99630aE8de28b9B80Df90eA2e';
-const VALIDATOR_ADDRESS ='0x5340fdE146C4fEf52558FE0943A23605CE160AF9'.toLowerCase();
+const VALIDATOR_ADDRESS = process.env.VALIDATOR_ADDRESS.toLowerCase();
 
 const TRANSFER_LOG_FN_CALL_SIG = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const REWARD_LOG_FN_CALL_SIG = '0x619caafabdd75649b302ba8419e48cccf64f37f1983ac4727cfb38b57703ffc9'.toLowerCase();
@@ -57,7 +78,13 @@ const main = async () => {
     // const transcoder  = await rpc.getTranscoder('');
     // console.log('transcoder', transcoder);
 
-    const acctTxns = await compileTxnHistory();
+    //const acctTxns = await compileTxnHistory();
+
+    const acctTxns = await getTransactionsList({
+        'api': API_URL,
+        'address': VALIDATOR_ADDRESS,
+        'api_token': API_TOKEN
+    });
 
     const bondedAccounts = [];
     const bondedAccountsAmount = {};
@@ -68,7 +95,7 @@ const main = async () => {
     };
 
     for(let i=0; i<acctTxns.length; i++) {
-        const txHash = acctTxns[i].Txhash;
+        const txHash = acctTxns[i].hash;
         // const txHash = '0xc738398fed8efa17ee69aca44c5bfa08c2fc85aeb8664fe6723f169f30b77407';
         // const txHash = '0xb1dab7ebb7c8e1fe8adf35671270b5f92dab40bc34dce2c7415ee064f40da1de';
         // console.log('fetching txn', txHash);
@@ -206,20 +233,25 @@ const main = async () => {
     const opts = { fields };
 
     //write csv file
-    try {
-        const parser = new Json2csvParser(opts);
-        const csv = parser.parse(transcoderTracker);
-        fs.writeFile("./output/" + VALIDATOR_ADDRESS + ".csv", csv, (err) => {
-            if (err) {
-                console.error(err);
-                return;
-            };
-            console.log("File has been created");
-        });
+    return new Promise((resolve, reject) => {
+        try {
+            const parser = new Json2csvParser(opts);
+            const csv = parser.parse(transcoderTracker);
+            fs.writeFile("./output/" + VALIDATOR_ADDRESS + ".csv", csv, (err) => {
+                if (err) {
+                    console.error(err);
+                    reject(err);
+                    return;
+                };
+                console.log("File has been created");
+                resolve();
+            });
 
-    } catch (err) {
-        console.error(err);
-    }
+        } catch (err) {
+            console.error(err);
+            reject(err);
+        }
+    })
 };
 
 
@@ -284,4 +316,9 @@ const addToBondedAccountsAmount = (address, amount, bondedAccountsAmount) => {
     if (amount) bondedAccountsAmount[address] += amount;
 }
 
-main();
+main().then(() => {
+    process.exit()
+}).catch((err) => {
+    console.log(err)
+    process.exit(1)
+});
