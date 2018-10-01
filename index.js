@@ -26,8 +26,8 @@ const SolidityCoder = require("./../web3.js/lib/solidity/coder.js");
 
 //const compileTxnHistory = require('./combine-txns-history.js');
 const getTransactionsList = require('./combine-txns-history.js');
-//const web3 = new Web3(new Web3.providers.HttpProvider('http://localhost:8545'));
-const web3 = new Web3(new Web3.providers.HttpProvider('http://geth-int:8545'));
+const web3 = new Web3(new Web3.providers.HttpProvider('http://localhost:8545'));
+//const web3 = new Web3(new Web3.providers.HttpProvider('http://geth-int:8545'));
 
 const Json2csvParser = require('json2csv').Parser;
 const fs = require("fs");
@@ -120,12 +120,14 @@ const main = async () => {
                             if (rewardFloat) {
                                 data.totalBonded += rewardFloat;
                             }
-                            await trackEvent(txHash, E_REWARD, fromAddress, toAddress, rewardFloat, info.transferContract, blockNumber, transcoderTracker);
+                            await trackEvent(txHash, E_REWARD, fromAddress, toAddress, rewardFloat, SolidityCoder.decodeParam('address', (info.transferContract.substr(2, topics[1].length - 2))), '', '', blockNumber, transcoderTracker);
                         }
                         // console.log('for address', SolidityCoder.decodeParam('address', topics[1]));
                     } else if (topics[0].toString().toLowerCase() == BOND_FN_CALL_SIG_2) {
                         const stripped0x = topics[1].substr(2, topics[1].length - 2);
+                        const stripped0x2 = topics[3].substr(2, topics[1].length - 2);
                         const transcoderAddress = SolidityCoder.decodeParam('address', stripped0x);
+                        const DelegatorAddress = SolidityCoder.decodeParam('address', stripped0x2);
 
                         const amountA = txnReceipt.logs[j].data.substr(2, 66);
                         const amountB = txnReceipt.logs[j].data.substr(66, 64);
@@ -144,7 +146,7 @@ const main = async () => {
                             data.totalBondAmount.push(newTotalBondAmount);
                             data.totalBonded += addedBond;
                             console.log('[bond] ' + fromAddress + ' bonded ' + addedBond + ' LPT to ' + transcoderAddress + ' total: ' + newTotalBondAmount + ' LPT' + ' [' + txHash + ']');
-                            await trackEvent(txHash, E_BOND, fromAddress, toAddress, addedBond, info.transferContract, blockNumber, transcoderTracker);
+                            await trackEvent(txHash, E_BOND, fromAddress, toAddress, addedBond, SolidityCoder.decodeParam('address', (info.transferContract.substr(2, topics[1].length - 2))), transcoderAddress, DelegatorAddress , blockNumber, transcoderTracker);
                             addToBondedAccounts(fromAddress, newBondAmount, bondedAccounts, bondedAccountsAmount);
                         } else if (transcoderAddress.toLowerCase() != VALIDATOR_ADDRESS && bondedAccounts.indexOf(fromAddress) > -1) {
                             const blockInfo = await getEthBlock(blockNumber);
@@ -152,7 +154,7 @@ const main = async () => {
                             const amountMoving = bondedAccountsAmount[fromAddress];
                             data.totalBonded -= amountMoving;
                             bondedAccounts.splice(bondedAccounts.indexOf(fromAddress), 1);
-                            await trackEvent(txHash, E_MOVE_BOND, fromAddress, toAddress, -amountMoving, info.transferContract, blockNumber, transcoderTracker);
+                            await trackEvent(txHash, E_MOVE_BOND, fromAddress, toAddress, -amountMoving, SolidityCoder.decodeParam('address', (info.transferContract.substr(2, topics[1].length - 2))), transcoderAddress, DelegatorAddress, blockNumber, transcoderTracker);
                         }
                         addToBondedAccountsAmount(fromAddress, newBondAmount, bondedAccountsAmount);
                     } else if (topics[0].toString().toLowerCase() == REBOND_FN_CALL_SIG) {
@@ -165,7 +167,7 @@ const main = async () => {
                             addToBondedAccounts(fromAddress, amount, bondedAccounts, bondedAccountsAmount);
                             if (amount) {
                                 data.totalBonded += amount;
-                                await trackEvent(txHash, E_REBOND, fromAddress, toAddress, amount, info.transferContract, blockNumber, transcoderTracker);
+                                await trackEvent(txHash, E_REBOND, fromAddress, toAddress, amount, SolidityCoder.decodeParam('address', (info.transferContract.substr(2, topics[1].length - 2))), '', '', blockNumber, transcoderTracker);
                             }
                         }
                     } else if (topics[0].toString().toLowerCase() == UNBOND_FN_CALL_SIG) {
@@ -181,7 +183,7 @@ const main = async () => {
                                 if (amount) {
                                     data.totalBonded -= amount;
                                 }
-                                await trackEvent(txHash, E_UNBOND, fromAddress, toAddress, -amount, info.transferContract, blockNumber, transcoderTracker);
+                                await trackEvent(txHash, E_UNBOND, fromAddress, toAddress, -amount, SolidityCoder.decodeParam('address', (info.transferContract.substr(2, topics[1].length - 2))), '', '', blockNumber, transcoderTracker);
                             }
                         }
                     } else if (topics[0].toString().toLowerCase() == BOND_LOG_FN_CALL_SIG) {
@@ -196,7 +198,7 @@ const main = async () => {
                                 addedBond += bondedAccountsAmount[fromAddress];
                             }
                             data.totalBonded += addedBond;
-                            await trackEvent(txHash, E_BOND, fromAddress, toAddress, addedBond, info.transferContract, blockNumber, transcoderTracker);
+                            await trackEvent(txHash, E_BOND, fromAddress, toAddress, addedBond, SolidityCoder.decodeParam('address', (info.transferContract.substr(2, topics[1].length - 2))), '', '', blockNumber, transcoderTracker);
                             addToBondedAccounts(fromAddress, info.transferAmount, bondedAccounts, bondedAccountsAmount);
                             console.log('[bond] ' + fromAddress + ' bonded ' + addedBond + ' LPT to ' + transcoderAddress + ' [' + txHash + ']');
 
@@ -204,7 +206,7 @@ const main = async () => {
                             console.log(fromAddress + ' went somewhere else!!! ' + txHash);
                             const amountMoving = bondedAccountsAmount[fromAddress];
                             data.totalBonded -= amountMoving;
-                            await trackEvent(txHash, E_MOVE_BOND, fromAddress, toAddress, -amountMoving, info.transferContract, blockNumber, transcoderTracker);
+                            await trackEvent(txHash, E_MOVE_BOND, fromAddress, toAddress, -amountMoving, SolidityCoder.decodeParam('address', (info.transferContract.substr(2, topics[1].length - 2))), '', '', blockNumber, transcoderTracker);
                         }
                         addToBondedAccountsAmount(fromAddress, info.transferAmount, bondedAccountsAmount);
                     } else if (topics[0].toString().toLowerCase() == TRANSFER_LOG_FN_CALL_SIG) {
@@ -229,7 +231,7 @@ const main = async () => {
 
     console.log('Transcoder ' + VALIDATOR_ADDRESS + ' has ' + data.totalBonded + ' LPT bonded.');
 
-    const fields = ['txHash', 'type', 'fromAddress', 'toAddress', 'amount', 'transferContract', 'date', 'time'];
+    const fields = ['txHash', 'type', 'fromAddress', 'toAddress', 'amount', 'transferContract', 'OwnAddress', 'DelegatorAddress', 'date', 'time'];
     const opts = { fields };
 
     //write csv file
@@ -295,7 +297,7 @@ const addToBondedAccounts = (address, amount, bondedAccounts) => {
     }
 }
 
-const trackEvent = async (txHash, type, fromAddress, toAddress, amount, transferContract, blockNumber, tracker) => {
+const trackEvent = async (txHash, type, fromAddress, toAddress, amount, transferContract, OwnAddress, DelegatorAddress, blockNumber, tracker) => {
     const blockInfo = await getEthBlock(blockNumber);
     tracker.push({
         txHash,
@@ -304,6 +306,8 @@ const trackEvent = async (txHash, type, fromAddress, toAddress, amount, transfer
         toAddress,
         amount,
         transferContract,
+        OwnAddress,
+        DelegatorAddress,
         date: new Date(blockInfo.timestamp*1000),
         time: blockInfo.timestamp
     });
