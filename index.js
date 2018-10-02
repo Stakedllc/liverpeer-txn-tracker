@@ -1,3 +1,20 @@
+/*
+
+Should be set as env vars:
+
+For staging:
+
+VALIDATOR_ADDRESS ='0x5340fdE146C4fEf52558FE0943A23605CE160AF9'
+API_URL = 'http://api-rinkeby.etherscan.io/api'
+API_TOKEN = 'YourApiToken'
+
+Enviroment variables:
+process.env.VALIDATOR_ADDRESS
+process.env.API_URL
+process.env.API_TOKEN
+
+*/
+
 require('dotenv').config();
 const redis = require("redis");
 const bluebird = require("bluebird");
@@ -7,8 +24,10 @@ const LivepeerSDK = require('@livepeer/sdk');
 const Web3 = require('web3');
 const SolidityCoder = require("./../web3.js/lib/solidity/coder.js");
 
-const compileTxnHistory = require('./combine-txns-history.js');
-const web3 = new Web3(new Web3.providers.HttpProvider('https://eth.bisontrailscomputing.com'));
+//const compileTxnHistory = require('./combine-txns-history.js');
+const getTransactionsList = require('./combine-txns-history.js');
+const web3 = new Web3(new Web3.providers.HttpProvider('http://localhost:8545'));
+//const web3 = new Web3(new Web3.providers.HttpProvider('http://geth-int:8545'));
 
 const Json2csvParser = require('json2csv').Parser;
 const fs = require("fs");
@@ -16,9 +35,11 @@ const fs = require("fs");
 const RDS_TXN_PRE = 'eth_txn_receipt.';
 const RDS_BLOCK_PRE = 'eth_block.';
 
+const API_URL = process.env.API_URL;
+const API_TOKEN = process.env.API_TOKEN;
 
 const LIVEPEER_CONTRACT = '0x511Bc4556D823Ae99630aE8de28b9B80Df90eA2e';
-const VALIDATOR_ADDRESS ='0x50d69f8253685999b4c74a67ccb3d240e2a56ed6'.toLowerCase();
+const VALIDATOR_ADDRESS = process.env.VALIDATOR_ADDRESS.toLowerCase();
 
 const TRANSFER_LOG_FN_CALL_SIG = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const REWARD_LOG_FN_CALL_SIG = '0x619caafabdd75649b302ba8419e48cccf64f37f1983ac4727cfb38b57703ffc9'.toLowerCase();
@@ -33,6 +54,7 @@ const E_BOND = 'BOND';
 const E_UNBOND = 'UNBOND';
 const E_REBOND = 'REBOND';
 const E_MOVE_BOND = 'MOVE_BOND';
+const E_TRANSFER = 'TRANSFER';
 
 const BN_DIVIDE_BY = new web3.utils.BN(100000000000000);
 const DIVIDE_BY_2 = 100000000;
@@ -56,7 +78,13 @@ const main = async () => {
     // const transcoder  = await rpc.getTranscoder('');
     // console.log('transcoder', transcoder);
 
-    const acctTxns = await compileTxnHistory();
+    //const acctTxns = await compileTxnHistory();
+
+    const acctTxns = await getTransactionsList({
+        'api': API_URL,
+        'address': VALIDATOR_ADDRESS,
+        'api_token': API_TOKEN
+    });
 
     const bondedAccounts = [];
     const bondedAccountsAmount = {};
@@ -67,7 +95,7 @@ const main = async () => {
     };
 
     for(let i=0; i<acctTxns.length; i++) {
-        const txHash = acctTxns[i].Txhash;
+        const txHash = acctTxns[i].hash;
         // const txHash = '0xc738398fed8efa17ee69aca44c5bfa08c2fc85aeb8664fe6723f169f30b77407';
         // const txHash = '0xb1dab7ebb7c8e1fe8adf35671270b5f92dab40bc34dce2c7415ee064f40da1de';
         // console.log('fetching txn', txHash);
@@ -76,6 +104,7 @@ const main = async () => {
             if (txHash) {
                 const txnReceipt = await getEthTransactionReceipt(txHash);
                 const fromAddress = txnReceipt.from;
+                const toAddress = txnReceipt.to;
                 const blockNumber = txnReceipt.blockNumber;
                 const info = {};
                 for (let j = 0; j < txnReceipt.logs.length; j++) {
@@ -91,12 +120,14 @@ const main = async () => {
                             if (rewardFloat) {
                                 data.totalBonded += rewardFloat;
                             }
-                            await trackEvent(E_REWARD, fromAddress, rewardFloat, blockNumber, transcoderTracker);
+                            await trackEvent(txHash, E_REWARD, fromAddress, toAddress, rewardFloat, SolidityCoder.decodeParam('address', (info.transferContract.substr(2, topics[1].length - 2))), '', '', blockNumber, transcoderTracker);
                         }
                         // console.log('for address', SolidityCoder.decodeParam('address', topics[1]));
                     } else if (topics[0].toString().toLowerCase() == BOND_FN_CALL_SIG_2) {
                         const stripped0x = topics[1].substr(2, topics[1].length - 2);
+                        const stripped0x2 = topics[3].substr(2, topics[1].length - 2);
                         const transcoderAddress = SolidityCoder.decodeParam('address', stripped0x);
+                        const DelegatorAddress = SolidityCoder.decodeParam('address', stripped0x2);
 
                         const amountA = txnReceipt.logs[j].data.substr(2, 66);
                         const amountB = txnReceipt.logs[j].data.substr(66, 64);
@@ -115,7 +146,7 @@ const main = async () => {
                             data.totalBondAmount.push(newTotalBondAmount);
                             data.totalBonded += addedBond;
                             console.log('[bond] ' + fromAddress + ' bonded ' + addedBond + ' LPT to ' + transcoderAddress + ' total: ' + newTotalBondAmount + ' LPT' + ' [' + txHash + ']');
-                            await trackEvent(E_BOND, fromAddress, addedBond, blockNumber, transcoderTracker);
+                            await trackEvent(txHash, E_BOND, fromAddress, toAddress, addedBond, SolidityCoder.decodeParam('address', (info.transferContract.substr(2, topics[1].length - 2))), transcoderAddress, DelegatorAddress , blockNumber, transcoderTracker);
                             addToBondedAccounts(fromAddress, newBondAmount, bondedAccounts, bondedAccountsAmount);
                         } else if (transcoderAddress.toLowerCase() != VALIDATOR_ADDRESS && bondedAccounts.indexOf(fromAddress) > -1) {
                             const blockInfo = await getEthBlock(blockNumber);
@@ -123,7 +154,7 @@ const main = async () => {
                             const amountMoving = bondedAccountsAmount[fromAddress];
                             data.totalBonded -= amountMoving;
                             bondedAccounts.splice(bondedAccounts.indexOf(fromAddress), 1);
-                            await trackEvent(E_MOVE_BOND, fromAddress, -amountMoving, blockNumber, transcoderTracker);
+                            await trackEvent(txHash, E_MOVE_BOND, fromAddress, toAddress, -amountMoving, SolidityCoder.decodeParam('address', (info.transferContract.substr(2, topics[1].length - 2))), transcoderAddress, DelegatorAddress, blockNumber, transcoderTracker);
                         }
                         addToBondedAccountsAmount(fromAddress, newBondAmount, bondedAccountsAmount);
                     } else if (topics[0].toString().toLowerCase() == REBOND_FN_CALL_SIG) {
@@ -136,7 +167,7 @@ const main = async () => {
                             addToBondedAccounts(fromAddress, amount, bondedAccounts, bondedAccountsAmount);
                             if (amount) {
                                 data.totalBonded += amount;
-                                await trackEvent(E_REBOND, fromAddress, amount, blockNumber, transcoderTracker);
+                                await trackEvent(txHash, E_REBOND, fromAddress, toAddress, amount, SolidityCoder.decodeParam('address', (info.transferContract.substr(2, topics[1].length - 2))), '', '', blockNumber, transcoderTracker);
                             }
                         }
                     } else if (topics[0].toString().toLowerCase() == UNBOND_FN_CALL_SIG) {
@@ -152,7 +183,7 @@ const main = async () => {
                                 if (amount) {
                                     data.totalBonded -= amount;
                                 }
-                                await trackEvent(E_UNBOND, fromAddress, -amount, blockNumber, transcoderTracker);
+                                await trackEvent(txHash, E_UNBOND, fromAddress, toAddress, -amount, SolidityCoder.decodeParam('address', (info.transferContract.substr(2, topics[1].length - 2))), '', '', blockNumber, transcoderTracker);
                             }
                         }
                     } else if (topics[0].toString().toLowerCase() == BOND_LOG_FN_CALL_SIG) {
@@ -167,7 +198,7 @@ const main = async () => {
                                 addedBond += bondedAccountsAmount[fromAddress];
                             }
                             data.totalBonded += addedBond;
-                            await trackEvent(E_BOND, fromAddress, addedBond, blockNumber, transcoderTracker);
+                            await trackEvent(txHash, E_BOND, fromAddress, toAddress, addedBond, SolidityCoder.decodeParam('address', (info.transferContract.substr(2, topics[1].length - 2))), '', '', blockNumber, transcoderTracker);
                             addToBondedAccounts(fromAddress, info.transferAmount, bondedAccounts, bondedAccountsAmount);
                             console.log('[bond] ' + fromAddress + ' bonded ' + addedBond + ' LPT to ' + transcoderAddress + ' [' + txHash + ']');
 
@@ -175,14 +206,14 @@ const main = async () => {
                             console.log(fromAddress + ' went somewhere else!!! ' + txHash);
                             const amountMoving = bondedAccountsAmount[fromAddress];
                             data.totalBonded -= amountMoving;
-                            await trackEvent(E_MOVE_BOND, fromAddress, -amountMoving, blockNumber, transcoderTracker);
+                            await trackEvent(txHash, E_MOVE_BOND, fromAddress, toAddress, -amountMoving, SolidityCoder.decodeParam('address', (info.transferContract.substr(2, topics[1].length - 2))), '', '', blockNumber, transcoderTracker);
                         }
                         addToBondedAccountsAmount(fromAddress, info.transferAmount, bondedAccountsAmount);
                     } else if (topics[0].toString().toLowerCase() == TRANSFER_LOG_FN_CALL_SIG) {
                         // const stripped0x = topics[1].substr(2, topics[1].length - 2);
                         // const transcoderAddress = SolidityCoder.decodeParam('address', stripped0x);
                         info.transferAmount = lptHexToNum(txnReceipt.logs[j].data) / 10000000000.0;
-
+                        info.transferContract = topics[2].toString().toLowerCase();
                     }
                 }
             }
@@ -200,24 +231,29 @@ const main = async () => {
 
     console.log('Transcoder ' + VALIDATOR_ADDRESS + ' has ' + data.totalBonded + ' LPT bonded.');
 
-    const fields = ['type', 'address', 'amount', 'date', 'time'];
+    const fields = ['txHash', 'type', 'fromAddress', 'toAddress', 'amount', 'transferContract', 'OwnAddress', 'DelegatorAddress', 'date', 'time'];
     const opts = { fields };
 
     //write csv file
-    try {
-        const parser = new Json2csvParser(opts);
-        const csv = parser.parse(transcoderTracker);
-        fs.writeFile("./output/" + VALIDATOR_ADDRESS + ".csv", csv, (err) => {
-            if (err) {
-                console.error(err);
-                return;
-            };
-            console.log("File has been created");
-        });
+    return new Promise((resolve, reject) => {
+        try {
+            const parser = new Json2csvParser(opts);
+            const csv = parser.parse(transcoderTracker);
+            fs.writeFile("./output/" + VALIDATOR_ADDRESS + ".csv", csv, (err) => {
+                if (err) {
+                    console.error(err);
+                    reject(err);
+                    return;
+                };
+                console.log("File has been created");
+                resolve();
+            });
 
-    } catch (err) {
-        console.error(err);
-    }
+        } catch (err) {
+            console.error(err);
+            reject(err);
+        }
+    })
 };
 
 
@@ -261,12 +297,17 @@ const addToBondedAccounts = (address, amount, bondedAccounts) => {
     }
 }
 
-const trackEvent = async (type, address, amount, blockNumber, tracker) => {
+const trackEvent = async (txHash, type, fromAddress, toAddress, amount, transferContract, OwnAddress, DelegatorAddress, blockNumber, tracker) => {
     const blockInfo = await getEthBlock(blockNumber);
     tracker.push({
-        type: type,
-        address: address,
-        amount: amount,
+        txHash,
+        type,
+        fromAddress,
+        toAddress,
+        amount,
+        transferContract,
+        OwnAddress,
+        DelegatorAddress,
         date: new Date(blockInfo.timestamp*1000),
         time: blockInfo.timestamp
     });
@@ -279,6 +320,9 @@ const addToBondedAccountsAmount = (address, amount, bondedAccountsAmount) => {
     if (amount) bondedAccountsAmount[address] += amount;
 }
 
-main();
-
-
+main().then(() => {
+    process.exit()
+}).catch((err) => {
+    console.log(err)
+    process.exit(1)
+});

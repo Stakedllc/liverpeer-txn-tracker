@@ -26,6 +26,8 @@
     "fs": "0.0.1-security",
     "json2csv": "^4.2.1",
     "redis": "^2.8.0",
+    "request": "^2.88.0",
+    "request-promise": "^4.2.2",
     "web3": "^1.0.0-beta.35"
   }
 }
